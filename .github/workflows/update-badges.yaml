@@ -1,0 +1,67 @@
+name: Update README Badges
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-badges:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get repository statistics
+        id: stats
+        run: |
+          # Count HA addons (directories with run.sh containing bashio shebang)
+          HA_ADDON_COUNT=$(find . -name "run.sh" -type f -exec sh -c 'head -n1 "$1" | grep -q "#!/usr/bin/with-contenv bashio"' _ {} \; -print | wc -l | tr -d ' ')
+          
+          echo "ha_addon_count=$HA_ADDON_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Generate badge URLs
+        id: badges
+        run: |
+          HA_ADDON_COUNT="${{ steps.stats.outputs.ha_addon_count }}"
+          
+          # Create badge markdown
+          cat > badges.md << EOF
+          <!-- AUTO-GENERATED BADGES - DO NOT EDIT MANUALLY -->
+          ![HA Addons](https://img.shields.io/badge/ha%20addons-${HA_ADDON_COUNT}-41BDF5?logo=homeassistant&logoColor=white)
+          <!-- END AUTO-GENERATED BADGES -->
+          EOF
+
+      - name: Update README with badges
+        run: |
+          # Check if README has badge section
+          if grep -q "<!-- AUTO-GENERATED BADGES - DO NOT EDIT MANUALLY -->" README.md; then
+            # Replace existing badges
+            sed -i '/<!-- AUTO-GENERATED BADGES - DO NOT EDIT MANUALLY -->/,/<!-- END AUTO-GENERATED BADGES -->/d' README.md
+          fi
+          
+          # Remove trailing newline from badges.md
+          printf '%s' "$(cat badges.md)" > badges.tmp && mv badges.tmp badges.md
+          
+          # Insert badges after the title (assuming # Timo's Home Assistant Add-Ons is the first line with content)
+          awk '/^# Timo'\''s Home Assistant Add-Ons/ { print; print ""; system("cat badges.md"); next }1' README.md > README.tmp
+          mv README.tmp README.md
+          rm badges.md
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add README.md
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update README badges"
+            git push
+          fi
